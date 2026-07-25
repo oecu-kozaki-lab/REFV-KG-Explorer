@@ -12,7 +12,7 @@ const state = {
   all: [], filtered: [], page: 1, pageSize: 50, sortIndex: null, sortDirection: "asc",
   visibleColumns: new Set(), highlightSelections: {}, annotationTrie: null, searchLabels: new Map(),
   searchLabelCounts: new Map(), searchTerms: [],
-  showInstanceLabels: false
+  showInstanceLabels: false, graphNodeFilter: null
 };
 const collator = new Intl.Collator(languageMode, { numeric: true, sensitivity: "base" });
 const settingsStorageKey = "refv-kg-view-settings";
@@ -208,7 +208,7 @@ function translateEnglishInterface() {
   document.querySelector("#graphEmptyState").textContent = "No matching network data.";
   document.querySelector("#closeGraphDialogBottom").textContent = "Close";
   document.querySelector("#resetGraphView").textContent = "Reset view";
-  document.querySelector("#graphCanvas").setAttribute("aria-label", "Causal structure and stakeholder network");
+  document.querySelector("#graphCanvas").setAttribute("aria-label", "Causal structure and stakeholder network. Select a node to filter the data table.");
   const legendLabels = document.querySelectorAll("#graphDialog .graph-legend span");
   ["Subject / Object", "Speaker Type", "Causal relation", "Stakeholder"].forEach((text, index) => {
     if (legendLabels[index]) setDirectText(`#graphDialog .graph-legend span:nth-child(${index + 1})`, text);
@@ -675,6 +675,10 @@ function applyFilter() {
     matchesSelection(speakerType, row.values[4]) &&
     matchesSelection(speakerClass, row.values[5]) &&
     matchesSelection(speaker, row.values[6]) &&
+    (!state.graphNodeFilter ||
+      (state.graphNodeFilter.type === "speaker"
+        ? row.values[4] === state.graphNodeFilter.label
+        : row.values[0] === state.graphNodeFilter.label || row.values[2] === state.graphNodeFilter.label)) &&
     terms.every((term) => row.values.some((value) => value.toLocaleLowerCase(languageMode).includes(term)))
   );
   state.page = 1;
@@ -841,7 +845,7 @@ function renderTriple(container, subject, relation, object, secondarySubject = [
 const graphNetwork = {
   nodes: [], edges: [], scale: 1, offsetX: 0, offsetY: 0,
   hovered: null, selected: null, dragNode: null, panning: false,
-  pointerX: 0, pointerY: 0
+  pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerMoved: false
 };
 
 function graphHash(value) {
@@ -957,6 +961,8 @@ function resizeGraphCanvas() {
   ui.graphCanvas.height = Math.max(1, Math.round(rect.height * ratio));
   ui.graphCanvas.style.width = `${rect.width}px`;
   ui.graphCanvas.style.height = `${rect.height}px`;
+  ui.graphCanvas._displayWidth = rect.width;
+  ui.graphCanvas._displayHeight = rect.height;
 }
 
 function fitGraphView() {
@@ -1055,9 +1061,46 @@ function graphNodeAt(clientX, clientY) {
   return [...graphNetwork.nodes].reverse().find((node) => Math.hypot(node.x - x, node.y - y) <= radius) || null;
 }
 
+function toggleGraphNodeFilter(node) {
+  const isSameSelection = state.graphNodeFilter?.id === node.id;
+  if (isSameSelection) {
+    state.graphNodeFilter = null;
+    graphNetwork.selected = null;
+    ui.graphNodeDetail.hidden = true;
+  } else {
+    state.graphNodeFilter = { id: node.id, type: node.type, label: node.label };
+    graphNetwork.selected = node;
+    ui.graphNodeDetail.hidden = false;
+    const nodeType = node.type === "speaker"
+      ? (languageMode === "en" ? "Speaker Type" : "発言者タイプ")
+      : (languageMode === "en" ? "Subject / Object" : "主語・目的語");
+    const clearHint = languageMode === "en" ? "Select again to clear" : "もう一度選択すると解除";
+    ui.graphNodeDetail.textContent = `${nodeType}: ${node.label} · ${countText(node.count)} · ${clearHint}`;
+  }
+  applyFilter();
+  drawGraphNetwork();
+}
+
 function initializeGraphCanvas() {
   if (ui.graphCanvas.dataset.initialized) return;
   ui.graphCanvas.dataset.initialized = "true";
+  if ("ResizeObserver" in window) {
+    let resizeFrame;
+    ui.graphCanvas._resizeObserver = new ResizeObserver(() => {
+      if (!ui.graphDialog.open) return;
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        const rect = ui.graphCanvasWrap.getBoundingClientRect();
+        const previousWidth = ui.graphCanvas._displayWidth ?? rect.width;
+        const previousHeight = ui.graphCanvas._displayHeight ?? rect.height;
+        resizeGraphCanvas();
+        graphNetwork.offsetX += (rect.width - previousWidth) / 2;
+        graphNetwork.offsetY += (rect.height - previousHeight) / 2;
+        drawGraphNetwork();
+      });
+    });
+    ui.graphCanvas._resizeObserver.observe(ui.graphCanvasWrap);
+  }
   ui.graphCanvas.addEventListener("wheel", (event) => {
     event.preventDefault();
     const rect = ui.graphCanvas.getBoundingClientRect();
@@ -1075,10 +1118,16 @@ function initializeGraphCanvas() {
     ui.graphCanvas.setPointerCapture(event.pointerId);
     graphNetwork.pointerX = event.clientX;
     graphNetwork.pointerY = event.clientY;
+    graphNetwork.pointerStartX = event.clientX;
+    graphNetwork.pointerStartY = event.clientY;
+    graphNetwork.pointerMoved = false;
     graphNetwork.dragNode = graphNodeAt(event.clientX, event.clientY);
     graphNetwork.panning = !graphNetwork.dragNode;
   });
   ui.graphCanvas.addEventListener("pointermove", (event) => {
+    if (Math.hypot(event.clientX - graphNetwork.pointerStartX, event.clientY - graphNetwork.pointerStartY) > 5) {
+      graphNetwork.pointerMoved = true;
+    }
     if (graphNetwork.dragNode) {
       const rect = ui.graphCanvas.getBoundingClientRect();
       graphNetwork.dragNode.x = (event.clientX - rect.left - graphNetwork.offsetX) / graphNetwork.scale;
@@ -1088,18 +1137,18 @@ function initializeGraphCanvas() {
       graphNetwork.offsetY += event.clientY - graphNetwork.pointerY;
     } else {
       graphNetwork.hovered = graphNodeAt(event.clientX, event.clientY);
-      ui.graphCanvas.style.cursor = graphNetwork.hovered ? "grab" : "default";
+      ui.graphCanvas.style.cursor = graphNetwork.hovered ? "pointer" : "default";
     }
     graphNetwork.pointerX = event.clientX;
     graphNetwork.pointerY = event.clientY;
     drawGraphNetwork();
   });
   const finishPointer = (event) => {
-    const clickedNode = graphNetwork.dragNode || graphNodeAt(event.clientX, event.clientY);
+    const clickedNode = !graphNetwork.pointerMoved
+      ? (graphNetwork.dragNode || graphNodeAt(event.clientX, event.clientY))
+      : null;
     if (clickedNode) {
-      graphNetwork.selected = clickedNode;
-      ui.graphNodeDetail.hidden = false;
-      ui.graphNodeDetail.textContent = `${clickedNode.type === "speaker" ? (languageMode === "en" ? "Speaker Type" : "発言者タイプ") : (languageMode === "en" ? "Subject / Object" : "主語・目的語")}: ${clickedNode.label} · ${countText(clickedNode.count)}`;
+      toggleGraphNodeFilter(clickedNode);
     }
     graphNetwork.dragNode = null;
     graphNetwork.panning = false;
@@ -1114,13 +1163,26 @@ function initializeGraphCanvas() {
 
 function showGraphDialog() {
   buildGraphNetwork();
+  if (state.graphNodeFilter) {
+    graphNetwork.selected = graphNetwork.nodes.find((node) => node.id === state.graphNodeFilter.id) || null;
+  }
   ui.graphEmptyState.hidden = graphNetwork.nodes.length !== 0;
   ui.graphCanvasWrap.hidden = graphNetwork.nodes.length === 0;
   ui.graphDialogCount.textContent = languageMode === "en"
     ? `${formattedNumber(graphNetwork.nodes.length)} nodes · ${formattedNumber(graphNetwork.edges.length)} edges from ${formattedNumber(state.filtered.length)} matching records`
     : `検索結果${formattedNumber(state.filtered.length)}件から、${formattedNumber(graphNetwork.nodes.length)}ノード・${formattedNumber(graphNetwork.edges.length)}エッジを表示`;
-  ui.graphNodeDetail.hidden = true;
-  ui.graphDialog.showModal();
+  if (graphNetwork.selected) {
+    const node = graphNetwork.selected;
+    const nodeType = node.type === "speaker"
+      ? (languageMode === "en" ? "Speaker Type" : "発言者タイプ")
+      : (languageMode === "en" ? "Subject / Object" : "主語・目的語");
+    const clearHint = languageMode === "en" ? "Select again to clear" : "もう一度選択すると解除";
+    ui.graphNodeDetail.textContent = `${nodeType}: ${node.label} · ${countText(node.count)} · ${clearHint}`;
+    ui.graphNodeDetail.hidden = false;
+  } else {
+    ui.graphNodeDetail.hidden = true;
+  }
+  if (!ui.graphDialog.open) ui.graphDialog.show();
   requestAnimationFrame(() => {
     resizeGraphCanvas();
     layoutGraphNetwork();
@@ -1339,6 +1401,8 @@ ui.search.addEventListener("input", () => {
 filterSelects.forEach((select) => select.addEventListener("change", applyFilter));
 ui.clearFilters.addEventListener("click", () => {
   filterSelects.forEach(clearSelect);
+  state.graphNodeFilter = null;
+  graphNetwork.selected = null;
   applyFilter();
 });
 ui.annotationInput.addEventListener("input", () => {
