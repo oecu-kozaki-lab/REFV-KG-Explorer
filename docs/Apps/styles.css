@@ -158,6 +158,8 @@ td:first-child { width: 64px; color: var(--muted); text-align: right; }
 .stakeholder-type-tag { display: inline-block; padding: 4px 9px; border: 1px solid var(--stakeholder-line); border-radius: 999px; color: #59316c; background: var(--stakeholder-soft); font-weight: 700; line-height: 1.45; }
 .triple-connector, .triple-arrow { display: inline-block; margin: 0 5px; color: #405a68; font-family: Arial, "Yu Gothic UI", sans-serif; font-size: 20px; font-weight: 900; line-height: 1; vertical-align: middle; }
 .instance-label-note { margin-top: 8px; padding: 6px 8px; border-left: 3px solid #79a3cb; border-radius: 4px; color: #49606d; background: #f3f7fa; font-size: 11px; font-weight: 500; line-height: 1.55; }
+.instance-label-note + .instance-label-note { margin-top: 4px; }
+.secondary-label-prefix { color: #285f9c; font-weight: 800; }
 .filter-match, .multi-select-option.is-selected { --match-color: #55707c; --match-bg: #edf3f5; }
 .filter-match-subjectObject, .filter-choice-subjectObject.is-selected { --match-color: #3479bd; --match-bg: #dfeeff; }
 .filter-match-relation, .filter-choice-relation.is-selected { --match-color: #b36a00; --match-bg: #fff0d5; }

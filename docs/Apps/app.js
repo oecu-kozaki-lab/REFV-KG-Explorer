@@ -3,10 +3,11 @@
 const urlParameters = new URLSearchParams(location.search);
 const languageMode = urlParameters.get("lang") === "en" ? "en" : "ja";
 const displayLocale = languageMode === "en" ? "en-US" : "ja-JP";
-const labelMode = urlParameters.get("labels") === "instance" ? "instance" : "class";
-const subjectLabelField = labelMode === "class" ? "scLabel" : "sLabel";
-const objectLabelField = labelMode === "class" ? "ocLabel" : "oLabel";
-const fields = [subjectLabelField, "pLabel", objectLabelField, "stCategoryLabel", "stTypeLabel", "stClassLabel", "stLabel", "opText", "tText", "prefLabel", "docTypeLabel", "docLabel", "sLabel", "oLabel", "scLabel", "ocLabel"];
+const requestedLabelMode = urlParameters.get("labels");
+const labelMode = ["class", "mid", "instance"].includes(requestedLabelMode) ? requestedLabelMode : "mid";
+const subjectLabelField = labelMode === "class" ? "scLabel" : labelMode === "mid" ? "scMidLabel" : "sLabel";
+const objectLabelField = labelMode === "class" ? "ocLabel" : labelMode === "mid" ? "ocMidLabel" : "oLabel";
+const fields = [subjectLabelField, "pLabel", objectLabelField, "stCategoryLabel", "stTypeLabel", "stClassLabel", "stLabel", "opText", "tText", "prefLabel", "docTypeLabel", "docLabel", "sLabel", "oLabel", "scLabel", "ocLabel", "scMidLabel", "ocMidLabel"];
 const state = {
   all: [], filtered: [], page: 1, pageSize: 50, sortIndex: null, sortDirection: "asc",
   visibleColumns: new Set(), highlightSelections: {}, annotationTrie: null, searchLabels: new Map(),
@@ -32,6 +33,7 @@ const ui = {
   status: document.querySelector("#status"),
   labelModeBadge: document.querySelector("#labelModeBadge"),
   labelModeSwitch: document.querySelector("#labelModeSwitch"),
+  alternativeLabelModeSwitch: document.querySelector("#alternativeLabelModeSwitch"),
   languageSwitch: document.querySelector("#languageSwitch"),
   dataFileName: document.querySelector("#dataFileName"),
   showInstanceLabelsSetting: document.querySelector("#showInstanceLabelsSetting"),
@@ -198,7 +200,7 @@ function translateEnglishInterface() {
     const textNode = [...input.parentElement.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
     if (textNode) textNode.textContent = settingTranslations[input.dataset.settingColumn];
   });
-  setDirectText("#showInstanceLabelsSetting", "Show instance labels with class labels");
+  setDirectText("#showInstanceLabelsSetting", "Show supplementary labels");
   document.querySelector("#closeDialog").setAttribute("aria-label", "Close");
   document.querySelector("#closeGraphDialog").setAttribute("aria-label", "Close");
   document.querySelector("#closeSettings").setAttribute("aria-label", "Close");
@@ -214,7 +216,7 @@ function translateEnglishInterface() {
   ui.help.replaceChildren(
     Object.assign(document.createElement("strong"), { textContent: "The JSON file could not be loaded automatically. " }),
     document.createTextNode("Select "),
-    Object.assign(document.createElement("code"), { id: "dataFileName", textContent: "refv-en-3.json" }),
+    Object.assign(document.createElement("code"), { id: "dataFileName", textContent: "refv-en-5.json" }),
     document.createTextNode(" using “Select JSON,” or open the app through a local web server.")
   );
   ui.dataFileName = document.querySelector("#dataFileName");
@@ -223,7 +225,7 @@ function translateEnglishInterface() {
 function buildPageUrl({ language = languageMode, labels = labelMode } = {}) {
   const parameters = new URLSearchParams();
   if (language === "en") parameters.set("lang", "en");
-  if (labels === "instance") parameters.set("labels", "instance");
+  if (labels !== "mid") parameters.set("labels", labels);
   const query = parameters.toString();
   return `${location.pathname}${query ? `?${query}` : ""}`;
 }
@@ -234,20 +236,28 @@ function initializeLanguageMode() {
   ui.languageSwitch.textContent = isEnglish ? "日本語" : "English";
   ui.languageSwitch.lang = isEnglish ? "ja" : "en";
   ui.languageSwitch.href = buildPageUrl({ language: isEnglish ? "ja" : "en" });
-  ui.dataFileName.textContent = isEnglish ? "refv-en-3.json" : "refv-ja-3.json";
+  ui.dataFileName.textContent = isEnglish ? "refv-en-5.json" : "refv-ja-5.json";
 }
 
 function initializeLabelMode() {
+  const setModeLink = (element, targetMode, japaneseText, englishText) => {
+    element.textContent = languageMode === "en" ? englishText : japaneseText;
+    element.href = buildPageUrl({ labels: targetMode });
+  };
   if (labelMode === "class") {
     ui.labelModeBadge.textContent = languageMode === "en" ? "Class-label mode" : "クラスラベル版";
-    ui.labelModeSwitch.textContent = languageMode === "en" ? "Switch to instance labels" : "個別ラベル版へ";
-    ui.labelModeSwitch.href = buildPageUrl({ labels: "instance" });
+    setModeLink(ui.labelModeSwitch, "mid", "中間クラス版へ", "Switch to intermediate classes");
+    setModeLink(ui.alternativeLabelModeSwitch, "instance", "個別ラベル版へ", "Switch to instance labels");
+  } else if (labelMode === "mid") {
+    ui.labelModeBadge.textContent = languageMode === "en" ? "Intermediate-class mode" : "中間クラス版";
+    setModeLink(ui.labelModeSwitch, "class", "クラスラベル版へ", "Switch to class labels");
+    setModeLink(ui.alternativeLabelModeSwitch, "instance", "個別ラベル版へ", "Switch to instance labels");
   } else {
     ui.labelModeBadge.textContent = languageMode === "en" ? "Instance-label mode" : "個別ラベル版";
-    ui.labelModeSwitch.textContent = languageMode === "en" ? "Switch to class labels" : "クラスラベル版へ";
-    ui.labelModeSwitch.href = buildPageUrl({ labels: "class" });
+    setModeLink(ui.labelModeSwitch, "class", "クラスラベル版へ", "Switch to class labels");
+    setModeLink(ui.alternativeLabelModeSwitch, "mid", "中間クラス版へ", "Switch to intermediate classes");
   }
-  ui.showInstanceLabelsSetting.hidden = labelMode !== "class";
+  ui.showInstanceLabelsSetting.hidden = labelMode === "instance";
 }
 
 function normalize(data) {
@@ -714,7 +724,7 @@ function appendKeywordHighlightedText(container, text) {
   if (lastIndex < value.length) container.append(document.createTextNode(value.slice(lastIndex)));
 }
 
-function appendCell(row, text, column = "", secondaryText = "") {
+function appendCell(row, text, column = "", secondaryLabels = []) {
   const cell = document.createElement("td");
   if (column) {
     cell.dataset.column = column;
@@ -746,11 +756,22 @@ function appendCell(row, text, column = "", secondaryText = "") {
       arrow.setAttribute("aria-hidden", "true");
       cell.append(arrow);
     }
-    if (secondaryText && (column === "subject" || column === "object")) {
-      const secondary = document.createElement("div");
-      secondary.className = "instance-label-note";
-      appendKeywordHighlightedText(secondary, secondaryText);
-      cell.append(secondary);
+    if (column === "subject" || column === "object") {
+      const labels = Array.isArray(secondaryLabels)
+        ? secondaryLabels
+        : secondaryLabels ? [{ text: secondaryLabels }] : [];
+      labels.filter((item) => item?.text).forEach((item) => {
+        const secondary = document.createElement("div");
+        secondary.className = "instance-label-note";
+        if (item.prefix) {
+          const prefix = document.createElement("strong");
+          prefix.className = "secondary-label-prefix";
+          prefix.textContent = `${item.prefix}: `;
+          secondary.append(prefix);
+        }
+        appendKeywordHighlightedText(secondary, item.text);
+        cell.append(secondary);
+      });
     }
   } else if (column === "speakerType") {
     const tag = document.createElement("span");
@@ -764,7 +785,7 @@ function appendCell(row, text, column = "", secondaryText = "") {
   row.append(cell);
 }
 
-function renderTriple(container, subject, relation, object, secondarySubject = "", secondaryObject = "") {
+function renderTriple(container, subject, relation, object, secondarySubject = [], secondaryObject = []) {
   const parts = [
     ["subject", subject],
     ["relation", relation],
@@ -782,14 +803,26 @@ function renderTriple(container, subject, relation, object, secondarySubject = "
     const tag = document.createElement("span");
     tag.className = `triple-tag triple-tag-${type}`;
     tag.textContent = value || "—";
-    const secondaryText = type === "subject" ? secondarySubject : type === "object" ? secondaryObject : "";
-    if (secondaryText) {
+    const secondaryLabels = type === "subject" ? secondarySubject : type === "object" ? secondaryObject : [];
+    const labels = Array.isArray(secondaryLabels)
+      ? secondaryLabels
+      : secondaryLabels ? [{ text: secondaryLabels }] : [];
+    if (labels.some((item) => item?.text)) {
       const part = document.createElement("span");
       part.className = "dialog-triple-part";
-      const secondary = document.createElement("span");
-      secondary.className = "instance-label-note";
-      secondary.textContent = secondaryText;
-      part.append(tag, secondary);
+      part.append(tag);
+      labels.filter((item) => item?.text).forEach((item) => {
+        const secondary = document.createElement("span");
+        secondary.className = "instance-label-note";
+        if (item.prefix) {
+          const prefix = document.createElement("strong");
+          prefix.className = "secondary-label-prefix";
+          prefix.textContent = `${item.prefix}: `;
+          secondary.append(prefix);
+        }
+        secondary.append(document.createTextNode(item.text));
+        part.append(secondary);
+      });
       fragment.append(part);
     } else {
       fragment.append(tag);
@@ -1140,10 +1173,20 @@ function render() {
     const valueColumns = ["subject", "relation", "object", "speakerCategory", "speakerType", "speakerClass", "speaker", "opinion"];
     item.values.slice(0, 8).forEach((value, index) => {
       const column = valueColumns[index];
-      const secondaryText = state.showInstanceLabels && column === "subject"
-        ? item.values[12]
-        : state.showInstanceLabels && column === "object" ? item.values[13] : "";
-      appendCell(tr, value, column, secondaryText);
+      let secondaryLabels = [];
+      if (state.showInstanceLabels && (column === "subject" || column === "object")) {
+        const instanceValue = column === "subject" ? item.values[12] : item.values[13];
+        if (labelMode === "mid") {
+          const classValue = column === "subject" ? item.values[14] : item.values[15];
+          secondaryLabels = [
+            { prefix: languageMode === "en" ? "Class" : "クラス", text: classValue },
+            { prefix: languageMode === "en" ? "Instance" : "個別", text: instanceValue }
+          ];
+        } else {
+          secondaryLabels = [{ text: instanceValue }];
+        }
+      }
+      appendCell(tr, value, column, secondaryLabels);
     });
     fragment.append(tr);
   });
@@ -1194,7 +1237,7 @@ function applySettings({ updateData = true, save = true } = {}) {
       .filter((input) => input.checked)
       .map((input) => input.dataset.settingColumn)
   );
-  state.showInstanceLabels = labelMode === "class"
+  state.showInstanceLabels = labelMode !== "instance"
     && document.querySelector('[data-setting-option="showInstanceLabels"]').checked;
   document.querySelectorAll("th[data-column]").forEach((cell) => {
     cell.hidden = !state.visibleColumns.has(cell.dataset.column);
@@ -1236,16 +1279,31 @@ function showText(item) {
   ui.dialogDocLabel.textContent = item.values[11] || "—";
   ui.dialogText.textContent = item.values[8] || (languageMode === "en" ? "No text available." : "本文はありません。");
   const isClassMode = labelMode === "class";
+  const isMidMode = labelMode === "mid";
   ui.dialogTripleLabel.textContent = languageMode === "en"
-    ? (isClassMode ? "Causal Structure (Triple): Class Labels" : "Causal Structure (Triple)")
-    : (isClassMode ? "因果構造（トリプル）：クラスラベル" : "因果構造（トリプル）");
+    ? (isClassMode ? "Causal Structure (Triple): Class Labels" : isMidMode ? "Causal Structure (Triple): Intermediate Classes" : "Causal Structure (Triple)")
+    : (isClassMode ? "因果構造（トリプル）：クラスラベル" : isMidMode ? "因果構造（トリプル）：中間クラス" : "因果構造（トリプル）");
   renderTriple(
     ui.dialogTriple,
-    isClassMode ? item.values[14] : item.values[12],
+    isClassMode ? item.values[14] : isMidMode ? item.values[16] : item.values[12],
     item.values[1],
-    isClassMode ? item.values[15] : item.values[13],
-    isClassMode && state.showInstanceLabels ? item.values[12] : "",
-    isClassMode && state.showInstanceLabels ? item.values[13] : ""
+    isClassMode ? item.values[15] : isMidMode ? item.values[17] : item.values[13],
+    labelMode !== "instance" && state.showInstanceLabels
+      ? (isMidMode
+        ? [
+            { prefix: languageMode === "en" ? "Class" : "クラス", text: item.values[14] },
+            { prefix: languageMode === "en" ? "Instance" : "個別", text: item.values[12] }
+          ]
+        : [{ text: item.values[12] }])
+      : [],
+    labelMode !== "instance" && state.showInstanceLabels
+      ? (isMidMode
+        ? [
+            { prefix: languageMode === "en" ? "Class" : "クラス", text: item.values[15] },
+            { prefix: languageMode === "en" ? "Instance" : "個別", text: item.values[13] }
+          ]
+        : [{ text: item.values[13] }])
+      : []
   );
   ui.dialogSpeakerCategory.textContent = item.values[3] || "—";
   ui.dialogSpeakerType.textContent = item.values[4] || "—";
@@ -1257,7 +1315,7 @@ function showText(item) {
 
 async function loadDefault() {
   try {
-    const dataFile = languageMode === "en" ? "refv-en-3.json" : "refv-ja-3.json";
+    const dataFile = languageMode === "en" ? "refv-en-5.json" : "refv-ja-5.json";
     const response = await fetch(dataFile);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     setData(await response.json());

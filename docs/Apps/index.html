@@ -20,6 +20,7 @@
       <div class="header-actions">
         <button id="settingsButton" class="header-action" type="button">表示設定</button>
         <a id="labelModeSwitch" class="header-action" href="?labels=class">クラスラベル版へ</a>
+        <a id="alternativeLabelModeSwitch" class="header-action" href="?labels=mid">中間クラス版へ</a>
         <a id="languageSwitch" class="header-action language-switch" href="?lang=en" lang="en">English</a>
         <label class="header-action header-file-button" for="fileInput">JSONを選択</label>
         <input id="fileInput" type="file" accept="application/json,.json" hidden>
@@ -124,7 +125,7 @@
 
     <div id="loadHelp" class="notice" hidden>
       <strong>JSONを自動で読み込めませんでした。</strong>
-      「JSONを選択」から <code id="dataFileName">refv-ja-3.json</code> を指定するか、ローカルWebサーバー経由で開いてください。
+      「JSONを選択」から <code id="dataFileName">refv-ja-5.json</code> を指定するか、ローカルWebサーバー経由で開いてください。
     </div>
 
     <section class="table-card" aria-label="データ一覧">
@@ -259,7 +260,7 @@
           <label><input type="checkbox" data-setting-column="speakerClass">発言者分類</label>
           <label><input type="checkbox" data-setting-column="speaker" checked>発言者</label>
           <label><input type="checkbox" data-setting-column="opinion" checked>意見・対応</label>
-          <label id="showInstanceLabelsSetting"><input type="checkbox" data-setting-option="showInstanceLabels" checked>クラスラベルに個別ラベルを併記</label>
+          <label id="showInstanceLabelsSetting"><input type="checkbox" data-setting-option="showInstanceLabels" checked>補助ラベルを併記</label>
         </div>
       </fieldset>
     </div>
